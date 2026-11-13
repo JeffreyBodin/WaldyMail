@@ -97,3 +97,25 @@ Command Prompt launcher:
 windows\postbox.cmd BuildApk
 windows\postbox.cmd InstallWsa
 ```
+
+---
+
+## 5. Modular JavaScript Toolkit & Windows Bundle Builder (`index.mjs`)
+
+`index.mjs` loads every script module in `lib/modules/` inline and exports each as an individual callable constructor function object (callable with or without `new`):
+
+- `MetadataInspector` (`lib/modules/MetadataInspector.mjs`)
+- `GradleBuilder` (`lib/modules/GradleBuilder.mjs`)
+- `AdbInstaller` (`lib/modules/AdbInstaller.mjs`)
+- `DockerPackager` (`lib/modules/DockerPackager.mjs`)
+- `WindowsBundleBuilder` (`lib/modules/WindowsBundleBuilder.mjs`)
+- `GitCommitHelper` (`lib/modules/GitCommitHelper.mjs`)
+- `PostboxToolkit` (composed master constructor)
+
+Prepare a self-contained Windows application/installer bundle in `dist/windows-bundle/`:
+
+```bash
+npm run prepare:windows
+```
+
+

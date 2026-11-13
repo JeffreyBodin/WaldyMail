@@ -1,18 +1,27 @@
 {
   "name": "postbox-offline-mail",
   "version": "1.0.0",
-  "description": "Offline-first Android email client (Postbox) packaged with CLI helpers for local APK/AAB builds and ADB installation. No server or cloud hosting.",
+  "description": "Offline-first Android email client (Postbox) with modular inline-loaded JS build, Windows bundle preparation, Docker export, and ADB CLI tools. No server or cloud hosting.",
   "private": false,
   "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./cli": "./bin/postbox.mjs",
+    "./modules/*": "./lib/modules/*.mjs"
+  },
   "bin": {
     "postbox": "./bin/postbox.mjs"
   },
   "files": [
     "README.md",
+    "index.mjs",
+    "lib/",
     "bin/",
     "app/",
     "gradle/",
     "windows/",
+    "scripts/",
     "build.gradle.kts",
     "gradle.properties",
     "settings.gradle.kts",
@@ -20,14 +29,20 @@
     ".dockerignore"
   ],
   "scripts": {
-    "info": "node ./bin/postbox.mjs info",
-    "check:cli": "node --check ./bin/postbox.mjs",
-    "build:apk": "node ./bin/postbox.mjs build debug",
-    "build:release-apk": "node ./bin/postbox.mjs build release",
-    "build:aab": "node ./bin/postbox.mjs build bundle",
-    "install:android": "node ./bin/postbox.mjs install",
+    "info": "node ./lib/modules/MetadataInspector.mjs",
+    "check:modules": "node --check ./index.mjs ./bin/postbox.mjs ./lib/modules/MetadataInspector.mjs ./lib/modules/GradleBuilder.mjs ./lib/modules/AdbInstaller.mjs ./lib/modules/DockerPackager.mjs ./lib/modules/WindowsBundleBuilder.mjs ./lib/modules/GitCommitHelper.mjs",
+    "build:apk": "node ./lib/modules/GradleBuilder.mjs debug",
+    "build:release-apk": "node ./lib/modules/GradleBuilder.mjs release",
+    "build:aab": "node ./lib/modules/GradleBuilder.mjs bundle",
+    "install:android": "node ./lib/modules/AdbInstaller.mjs android",
+    "install:wsa": "node ./lib/modules/AdbInstaller.mjs wsa",
+    "prepare:windows": "node ./lib/modules/WindowsBundleBuilder.mjs",
+    "package:docker": "node ./lib/modules/DockerPackager.mjs export",
+    "docker:commands": "node ./lib/modules/DockerPackager.mjs commands",
+    "git:status": "node ./lib/modules/GitCommitHelper.mjs status",
     "pack:npm": "npm pack",
-    "test": "node ./bin/postbox.mjs test"
+    "verify:toolkit": "node --test ./scripts/verify-toolkit.mjs",
+    "test": "node ./lib/modules/GradleBuilder.mjs test"
   },
   "dependencies": {},
   "devDependencies": {},
@@ -42,6 +57,7 @@
     "email",
     "apk",
     "aab",
+    "windows-bundle",
     "google-play",
     "jetpack-compose"
   ],

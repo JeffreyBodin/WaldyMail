@@ -1,8 +1,5 @@
 <resources>
     <string name="app_name">Postbox</string>
-    <string name="sign_in_with_google">Sign in with Google</string>
-    <string name="auth_headline">Calm, focused correspondence</string>
-    <string name="auth_subheadline">Search your inbox by subject, body, or sender and keep every contact close at hand.</string>
     <string name="search_inbox_placeholder">Search subject, body, or sender</string>
     <string name="search_contacts_placeholder">Search contacts by name or email</string>
     <string name="compose">Compose</string>
@@ -14,5 +11,5 @@
     <string name="no_emails_title">Nothing here yet</string>
     <string name="no_search_results_title">No matching emails</string>
     <string name="no_contacts_title">No contacts saved</string>
-    <string name="sign_out">Sign out</string>
+    <string name="edit_local_identity">Edit local identity</string>
 </resources>

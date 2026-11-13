@@ -1,7 +1,6 @@
 package com.example.ui.mail
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -21,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Contacts
@@ -34,11 +32,15 @@ import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.Mail
+import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,10 +57,13 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
@@ -72,13 +77,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -86,40 +89,27 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.R
 import com.example.data.model.Contact
+import com.example.data.model.EmailMessage
 import com.example.data.model.MailFolder
 import com.example.data.repository.MailboxRepository
-import com.example.ui.auth.signOutUser
 import com.example.ui.contacts.ContactEditorDialog
 import com.example.ui.contacts.ContactsScreen
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PostboxAppScreen(
-  currentUserId: String,
-  userEmail: String,
-  userDisplayName: String,
-  modifier: Modifier = Modifier,
-) {
+fun PostboxAppScreen(modifier: Modifier = Modifier) {
   val viewModel: MailboxViewModel =
     viewModel(
-      key = currentUserId,
       factory = viewModelFactory {
         initializer {
           val app = checkNotNull(this[APPLICATION_KEY])
-          val databaseId = app.getString(R.string.firestore_database_id)
-          val db = FirebaseFirestore.getInstance(databaseId)
-          MailboxViewModel(
-            repository = MailboxRepository(db),
-            currentUserId = currentUserId,
-            currentUserEmail = userEmail,
-            currentUserDisplayName = userDisplayName,
-          )
+          MailboxViewModel(repository = MailboxRepository(app))
         }
-      },
+      }
     )
 
+  val localProfile by viewModel.localProfile.collectAsStateWithLifecycle()
   val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
   val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
   val searchFilters by viewModel.searchFilters.collectAsStateWithLifecycle()
@@ -131,15 +121,13 @@ fun PostboxAppScreen(
   val contactsQuery by viewModel.contactsQuery.collectAsStateWithLifecycle()
   val composeState by viewModel.composeState.collectAsStateWithLifecycle()
   val contactEditorState by viewModel.contactEditorState.collectAsStateWithLifecycle()
+  val profileEditorState by viewModel.profileEditorState.collectAsStateWithLifecycle()
 
-  val allContacts: List<Contact> =
-    (allContactsState as? UiState.Success)?.data ?: emptyList()
+  val allContacts: List<Contact> = (allContactsState as? UiState.Success)?.data ?: emptyList()
 
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val snackbarHostState = remember { SnackbarHostState() }
   val scope = rememberCoroutineScope()
-  val context = LocalContext.current
-  val credentialManager = remember(context) { CredentialManager.create(context) }
 
   LaunchedEffect(viewModel) {
     viewModel.snackbarMessages.collect { msg -> snackbarHostState.showSnackbar(msg) }
@@ -151,16 +139,16 @@ fun PostboxAppScreen(
       FolderDrawerContent(
         selectedFolder = selectedFolder,
         unreadInboxCount = unreadInboxCount,
-        userDisplayName = userDisplayName,
-        userEmail = userEmail,
+        userDisplayName = localProfile.displayName,
+        userEmail = localProfile.email,
         onSelectFolder = { folder ->
           viewModel.selectTab(MainTab.MAIL)
           viewModel.selectFolder(folder)
           scope.launch { drawerState.close() }
         },
-        onSignOut = {
+        onEditLocalIdentity = {
           scope.launch { drawerState.close() }
-          signOutUser(credentialManager = credentialManager, scope = scope)
+          viewModel.openProfileEditor()
         },
       )
     },
@@ -246,25 +234,45 @@ fun PostboxAppScreen(
                   }
                 },
                 title = {
-                  Column {
-                    val titleText =
-                      when {
-                        selectedTab == MainTab.CONTACTS -> stringResource(R.string.nav_contacts)
-                        searchFilters.query.isNotBlank() ->
-                          "Search · ${searchFilters.scope.label}"
-                        else -> selectedFolder.label
-                      }
-                    Text(
-                      text = titleText,
-                      style = MaterialTheme.typography.titleLarge,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
-                    )
-                  }
+                  val titleText =
+                    when {
+                      selectedTab == MainTab.CONTACTS -> stringResource(R.string.nav_contacts)
+                      searchFilters.query.isNotBlank() -> "Search · ${searchFilters.scope.label}"
+                      else -> selectedFolder.label
+                    }
+                  Text(
+                    text = titleText,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
                 },
                 actions = {
+                  Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.padding(end = 8.dp),
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                      Icon(
+                        imageVector = Icons.Rounded.PhoneAndroid,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(14.dp),
+                      )
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text(
+                        text = "Offline",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                      )
+                    }
+                  }
                   MonogramAvatar(
-                    name = userDisplayName.ifBlank { userEmail },
+                    name = localProfile.displayName,
                     size = 34.dp,
                     modifier = Modifier.padding(end = 14.dp),
                   )
@@ -471,7 +479,7 @@ fun PostboxAppScreen(
   if (composeState.isOpen) {
     ComposeEmailDialog(
       state = composeState,
-      senderEmail = userEmail.ifBlank { "me@postbox.app" },
+      senderEmail = localProfile.email,
       contacts = allContacts,
       onToChange = viewModel::updateComposeTo,
       onSubjectChange = viewModel::updateComposeSubject,
@@ -491,6 +499,16 @@ fun PostboxAppScreen(
       onDismiss = viewModel::closeContactEditor,
     )
   }
+
+  if (profileEditorState.isOpen) {
+    LocalProfileEditorDialog(
+      state = profileEditorState,
+      onNameChange = viewModel::updateProfileDisplayName,
+      onEmailChange = viewModel::updateProfileEmail,
+      onSave = viewModel::saveProfile,
+      onDismiss = viewModel::closeProfileEditor,
+    )
+  }
 }
 
 @Composable
@@ -505,8 +523,8 @@ private fun MailListPane(
   onToggleUnreadOnly: () -> Unit,
   onToggleStarredOnly: () -> Unit,
   onClearSearch: () -> Unit,
-  onEmailClick: (com.example.data.model.EmailMessage) -> Unit,
-  onToggleStar: (com.example.data.model.EmailMessage) -> Unit,
+  onEmailClick: (EmailMessage) -> Unit,
+  onToggleStar: (EmailMessage) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   Column(modifier = modifier.fillMaxSize()) {
@@ -582,7 +600,7 @@ private fun FolderDrawerContent(
   userDisplayName: String,
   userEmail: String,
   onSelectFolder: (MailFolder) -> Unit,
-  onSignOut: () -> Unit,
+  onEditLocalIdentity: () -> Unit,
 ) {
   ModalDrawerSheet(
     drawerContainerColor = MaterialTheme.colorScheme.surface,
@@ -597,7 +615,7 @@ private fun FolderDrawerContent(
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-          text = userDisplayName.ifBlank { "Signed in" },
+          text = userDisplayName,
           style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
           color = MaterialTheme.colorScheme.onSurface,
         )
@@ -607,6 +625,12 @@ private fun FolderDrawerContent(
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = "Device-local storage · No network",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.tertiary,
         )
       }
 
@@ -662,26 +686,84 @@ private fun FolderDrawerContent(
 
       NavigationDrawerItem(
         selected = false,
-        onClick = onSignOut,
+        onClick = onEditLocalIdentity,
         icon = {
           Icon(
-            imageVector = Icons.AutoMirrored.Rounded.Logout,
+            imageVector = Icons.Rounded.ManageAccounts,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.secondary,
+            tint = MaterialTheme.colorScheme.primary,
           )
         },
         label = {
           Text(
-            text = stringResource(R.string.sign_out),
-            color = MaterialTheme.colorScheme.secondary,
+            text = stringResource(R.string.edit_local_identity),
+            color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.labelLarge,
           )
         },
         modifier =
           Modifier
             .padding(NavigationDrawerItemDefaults.ItemPadding)
-            .testTag("sign_out_button"),
+            .testTag("edit_identity_button"),
       )
     }
   }
+}
+
+@Composable
+private fun LocalProfileEditorDialog(
+  state: ProfileEditorState,
+  onNameChange: (String) -> Unit,
+  onEmailChange: (String) -> Unit,
+  onSave: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = stringResource(R.string.edit_local_identity),
+        style = MaterialTheme.typography.titleLarge,
+      )
+    },
+    text = {
+      Column {
+        if (state.validationError != null) {
+          Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+          ) {
+            Text(
+              text = state.validationError,
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSecondaryContainer,
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+          }
+        }
+        OutlinedTextField(
+          value = state.displayName,
+          onValueChange = onNameChange,
+          label = { Text("Display name") },
+          singleLine = true,
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth().testTag("profile_name_input"),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+          value = state.email,
+          onValueChange = onEmailChange,
+          label = { Text("Local email address") },
+          singleLine = true,
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth().testTag("profile_email_input"),
+        )
+      }
+    },
+    confirmButton = {
+      Button(onClick = onSave, modifier = Modifier.testTag("save_profile_button")) { Text("Save") }
+    },
+    dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+  )
 }

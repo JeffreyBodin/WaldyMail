@@ -1,14 +1,12 @@
 package com.example.ui.mail
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.Contact
 import com.example.data.model.EmailMessage
+import com.example.data.model.LocalAccountProfile
 import com.example.data.model.MailFolder
 import com.example.data.repository.MailboxRepository
-import com.google.firebase.firestore.FirebaseFirestoreException
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -55,6 +53,13 @@ data class ContactEditorState(
   val validationError: String? = null,
 )
 
+data class ProfileEditorState(
+  val isOpen: Boolean = false,
+  val displayName: String = "",
+  val email: String = "",
+  val validationError: String? = null,
+)
+
 data class MailSearchFilters(
   val query: String = "",
   val fieldFilter: SearchFieldFilter = SearchFieldFilter.ALL,
@@ -65,10 +70,10 @@ data class MailSearchFilters(
 
 class MailboxViewModel(
   private val repository: MailboxRepository,
-  private val currentUserId: String,
-  val currentUserEmail: String,
-  val currentUserDisplayName: String,
 ) : ViewModel() {
+
+  private val _localProfile = MutableStateFlow(repository.getLocalAccountProfile())
+  val localProfile: StateFlow<LocalAccountProfile> = _localProfile.asStateFlow()
 
   private val _selectedTab = MutableStateFlow(MainTab.MAIL)
   val selectedTab: StateFlow<MainTab> = _selectedTab.asStateFlow()
@@ -91,23 +96,17 @@ class MailboxViewModel(
   private val _contactEditorState = MutableStateFlow(ContactEditorState())
   val contactEditorState: StateFlow<ContactEditorState> = _contactEditorState.asStateFlow()
 
+  private val _profileEditorState = MutableStateFlow(ProfileEditorState())
+  val profileEditorState: StateFlow<ProfileEditorState> = _profileEditorState.asStateFlow()
+
   private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
   val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
 
   val allEmailsState: StateFlow<UiState<List<EmailMessage>>> =
     repository
-      .observeEmails(currentUserId)
+      .observeEmails()
       .map<List<EmailMessage>, UiState<List<EmailMessage>>> { UiState.Success(it) }
-      .catch { error ->
-        val firestoreError =
-          generateSequence(error) { it.cause }
-            .filterIsInstance<FirebaseFirestoreException>()
-            .firstOrNull()
-        if (firestoreError == null && error is CancellationException) throw error
-        val rootError = firestoreError ?: error
-        Log.w(TAG, "Error observing emails", rootError)
-        emit(UiState.Error(rootError.message ?: "Failed to load mailbox"))
-      }
+      .catch { error -> emit(UiState.Error(error.message ?: "Failed to load local mailbox")) }
       .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
@@ -165,18 +164,9 @@ class MailboxViewModel(
 
   val allContactsState: StateFlow<UiState<List<Contact>>> =
     repository
-      .observeContacts(currentUserId)
+      .observeContacts()
       .map<List<Contact>, UiState<List<Contact>>> { UiState.Success(it) }
-      .catch { error ->
-        val firestoreError =
-          generateSequence(error) { it.cause }
-            .filterIsInstance<FirebaseFirestoreException>()
-            .firstOrNull()
-        if (firestoreError == null && error is CancellationException) throw error
-        val rootError = firestoreError ?: error
-        Log.w(TAG, "Error observing contacts", rootError)
-        emit(UiState.Error(rootError.message ?: "Failed to load contacts"))
-      }
+      .catch { error -> emit(UiState.Error(error.message ?: "Failed to load contacts")) }
       .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
@@ -210,13 +200,7 @@ class MailboxViewModel(
       )
 
   init {
-    viewModelScope.launch {
-      repository.ensureInitialMailboxSeeded(
-        userId = currentUserId,
-        userEmail = currentUserEmail,
-        displayName = currentUserDisplayName,
-      )
-    }
+    viewModelScope.launch { repository.ensureInitialMailboxSeeded() }
   }
 
   fun selectTab(tab: MainTab) {
@@ -401,6 +385,7 @@ class MailboxViewModel(
       closeCompose()
       return
     }
+    val profile = _localProfile.value
     _composeState.update { it.copy(isSending = true, validationError = null) }
     viewModelScope.launch {
       repository
@@ -409,12 +394,12 @@ class MailboxViewModel(
           subject = draft.subject,
           body = draft.body,
           existingDraftId = draft.draftId,
-          senderName = currentUserDisplayName,
-          senderEmail = currentUserEmail,
+          senderName = profile.displayName,
+          senderEmail = profile.email,
         )
         .onSuccess {
           _composeState.value = ComposeDraftState()
-          _snackbarMessages.tryEmit("Draft saved")
+          _snackbarMessages.tryEmit("Draft saved locally")
         }
         .onFailure { err ->
           _composeState.update {
@@ -436,6 +421,7 @@ class MailboxViewModel(
       return
     }
 
+    val profile = _localProfile.value
     _composeState.update { it.copy(isSending = true, validationError = null) }
     viewModelScope.launch {
       repository
@@ -444,22 +430,22 @@ class MailboxViewModel(
           subject = draft.subject.ifBlank { "(No subject)" },
           body = draft.body,
           existingDraftId = draft.draftId,
-          senderName = currentUserDisplayName,
-          senderEmail = currentUserEmail,
+          senderName = profile.displayName,
+          senderEmail = profile.email,
         )
         .onSuccess {
           _composeState.value = ComposeDraftState()
           val selfNote =
-            if (recipient.equals(currentUserEmail, ignoreCase = true)) {
-              "Email sent & delivered to Inbox"
+            if (recipient.equals(profile.email, ignoreCase = true)) {
+              "Saved to Sent & delivered to Inbox"
             } else {
-              "Email sent to $recipient"
+              "Saved to Sent for $recipient"
             }
           _snackbarMessages.tryEmit(selfNote)
         }
         .onFailure { err ->
           _composeState.update {
-            it.copy(isSending = false, validationError = err.message ?: "Failed to send email")
+            it.copy(isSending = false, validationError = err.message ?: "Failed to save email")
           }
         }
     }
@@ -545,8 +531,48 @@ class MailboxViewModel(
     }
   }
 
+  // --- Local Identity ---
+
+  fun openProfileEditor() {
+    val current = _localProfile.value
+    _profileEditorState.value =
+      ProfileEditorState(
+        isOpen = true,
+        displayName = current.displayName,
+        email = current.email,
+      )
+  }
+
+  fun updateProfileDisplayName(name: String) {
+    _profileEditorState.update { it.copy(displayName = name, validationError = null) }
+  }
+
+  fun updateProfileEmail(email: String) {
+    _profileEditorState.update { it.copy(email = email, validationError = null) }
+  }
+
+  fun closeProfileEditor() {
+    _profileEditorState.value = ProfileEditorState()
+  }
+
+  fun saveProfile() {
+    val editor = _profileEditorState.value
+    val name = editor.displayName.trim()
+    val email = editor.email.trim()
+    if (name.isEmpty()) {
+      _profileEditorState.update { it.copy(validationError = "Display name is required.") }
+      return
+    }
+    if (!EMAIL_REGEX.matches(email)) {
+      _profileEditorState.update { it.copy(validationError = "Enter a valid email address.") }
+      return
+    }
+    _localProfile.value = repository.updateLocalAccountProfile(name, email)
+    _profileEditorState.value = ProfileEditorState()
+    _snackbarMessages.tryEmit("Local identity updated")
+  }
+
   private companion object {
-    const val TAG = "MailboxVM"
     const val STOP_TIMEOUT_MILLIS = 5000L
     val EMAIL_REGEX = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
   }

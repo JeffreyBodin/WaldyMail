@@ -1,0 +1,15 @@
+.git
+.gradle
+.kotlin
+.idea
+.build-outputs
+build
+app/build
+node_modules
+dist
+out
+*.jks
+*.keystore
+!debug.keystore
+.env
+local.properties

@@ -2,11 +2,13 @@
   "name": "postbox-offline-mail",
   "version": "1.0.0",
   "description": "Offline-first Android email client (Postbox) packaged with CLI helpers for local APK/AAB builds and ADB installation. No server or cloud hosting.",
+  "private": false,
   "type": "module",
   "bin": {
     "postbox": "./bin/postbox.mjs"
   },
   "files": [
+    "README.md",
     "bin/",
     "app/",
     "gradle/",
@@ -15,17 +17,25 @@
     "gradle.properties",
     "settings.gradle.kts",
     "Dockerfile",
-    ".dockerignore",
-    "PACKAGING.md"
+    ".dockerignore"
   ],
   "scripts": {
     "info": "node ./bin/postbox.mjs info",
+    "check:cli": "node --check ./bin/postbox.mjs",
     "build:apk": "node ./bin/postbox.mjs build debug",
     "build:release-apk": "node ./bin/postbox.mjs build release",
     "build:aab": "node ./bin/postbox.mjs build bundle",
     "install:android": "node ./bin/postbox.mjs install",
+    "pack:npm": "npm pack",
     "test": "node ./bin/postbox.mjs test"
   },
+  "dependencies": {},
+  "devDependencies": {},
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
   "keywords": [
     "android",
     "offline",
@@ -36,7 +46,8 @@
     "jetpack-compose"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   },
   "license": "Apache-2.0"
 }

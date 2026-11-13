@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,5 +63,24 @@ test('WindowsBundleBuilder stages project files, Setup-Postbox.cmd, and bundle-m
     assert.equal(parsed.launcher, 'Setup-Postbox.cmd');
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('.gitignore excludes keys, certificates, env files, and service-account credentials', () => {
+  const sampleSecretPaths = [
+    '.env',
+    '.env.local',
+    'my-upload-key.jks',
+    'release.keystore',
+    'service-account.json',
+    'google-services.json',
+    'private.pem',
+    'signing.key',
+    'id_ed25519'
+  ];
+
+  for (const candidate of sampleSecretPaths) {
+    const res = spawnSync('git', ['check-ignore', '-q', candidate], { encoding: 'utf8' });
+    assert.equal(res.status, 0, `${candidate} must be matched by .gitignore`);
   }
 });

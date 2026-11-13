@@ -12,6 +12,7 @@ Usage:
   ./scripts/stage-commit.sh -p [path...]            Interactive hunk/line staging (`git add -p`) + commit
   ./scripts/stage-commit.sh -m "<msg>" <path...>    Stage specific path(s) and commit with <msg>
   ./scripts/stage-commit.sh -i [path...]            Interactive guided per-file/hunk staging & commit prompt
+  ./scripts/stage-commit.sh --remote [url] [name]   Inspect or configure git remote and push main
   ./scripts/stage-commit.sh --status                Show unstaged, staged, and recent commit summary
   ./scripts/stage-commit.sh -h | --help             Show this help message
 
@@ -92,12 +93,27 @@ prompt_commit_message() {
   COMMIT_MESSAGE="$full_msg"
 }
 
+verify_no_secrets_staged() {
+  local staged_files
+  staged_files="$(git diff --cached --name-only)"
+  if printf '%s\n' "$staged_files" | grep -Eiq '(^\.env($|\.)|\.env$|\.jks$|\.keystore$|\.p12$|\.pfx$|\.pem$|\.key$|\.ppk$|\.secret$|service[-_]?account.*\.json$|-credentials\.json$|google-services.*\.json$|firebase_applet_config\.xml$|(^|/)id_(rsa|ed25519|ecdsa))'; then
+    die "Blocked commit: staged file matches ignored key, certificate, .env, or service-account pattern."
+  fi
+
+  local added_lines
+  added_lines="$(git diff --cached -U0 -- ':!scripts/stage-commit.sh' ':!.gitignore' ':!.dockerignore' | grep '^+[^+]' || true)"
+  if printf '%s\n' "$added_lines" | grep -Eq '(-----BEGIN ([A-Z ]+)?PRIVATE KEY-----|"type"[[:space:]]*:[[:space:]]*"service_account"|"private_key_id"[[:space:]]*:[[:space:]]*"|AIza[0-9A-Za-z_-]{35}|ghp_[0-9A-Za-z]{36}|AKIA[0-9A-Z]{16})'; then
+    die "Blocked commit: staged diff contains a private key, service-account JSON key, or API secret."
+  fi
+}
+
 commit_staged() {
   local msg="$1"
   if git diff --cached --quiet; then
     die "No changes are currently staged for commit."
   fi
 
+  verify_no_secrets_staged
   validate_message "$msg"
 
   echo ""
@@ -105,6 +121,55 @@ commit_staged() {
   git diff --cached --stat
   echo ""
   git commit -m "$msg"
+  push_commit
+}
+
+push_commit() {
+  if [ "${NO_PUSH:-0}" = "1" ]; then
+    return 0
+  fi
+
+  local remote=""
+  remote="$(git config --get "branch.$(git symbolic-ref --short HEAD 2>/dev/null || echo main).remote" 2>/dev/null || true)"
+  if [ -z "$remote" ] && git remote get-url origin >/dev/null 2>&1; then
+    remote="origin"
+  fi
+
+  if [ -n "$remote" ]; then
+    echo "Pushing commit to remote '$remote'..."
+    git push -u "$remote" HEAD
+  else
+    echo "No git remote configured; commit saved locally on $(git rev-parse --short HEAD)."
+  fi
+}
+
+configure_remote() {
+  local remote_url="${1:-}"
+  local remote_name="${2:-origin}"
+
+  if [ -z "$remote_url" ]; then
+    echo "=== Configured Git Remotes ==="
+    if [ -z "$(git remote -v)" ]; then
+      echo "No git remote configured yet."
+      echo "Run: $0 --remote <url> [remote_name]"
+      return 0
+    fi
+    git remote -v
+    return 0
+  fi
+
+  if git remote get-url "$remote_name" >/dev/null 2>&1; then
+    git remote set-url "$remote_name" "$remote_url"
+    echo "Updated remote '$remote_name' -> $remote_url"
+  else
+    git remote add "$remote_name" "$remote_url"
+    echo "Added remote '$remote_name' -> $remote_url"
+  fi
+
+  local current_branch
+  current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo main)"
+  echo "Pushing branch '$current_branch' to '$remote_name'..."
+  git push -u "$remote_name" "$current_branch"
 }
 
 show_status() {
@@ -213,6 +278,10 @@ main() {
     -h|--help)
       usage
       ;;
+    --remote)
+      shift
+      configure_remote "$@"
+      ;;
     --status)
       show_status
       ;;
@@ -229,7 +298,7 @@ main() {
       [ "$#" -ge 2 ] || die "Usage: $0 -m \"<message>\" <path...>"
       local msg="$1"
       shift
-      git add -- "$@"
+      git add -A -- "$@"
       commit_staged "$msg"
       ;;
     *)
